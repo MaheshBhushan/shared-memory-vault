@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -65,7 +66,7 @@ def process_queue(config: Config) -> int:
         temporary = target.with_suffix(".tmp")
         temporary.write_text(builtin_markdown(session), encoding="utf-8")
         os.replace(temporary, target)
-        with connect(config.database) as db:
+        with closing(connect(config.database)) as db:
             update(db, config.vault, only=target)
         completed.append(name)
     with _lock(lock):
