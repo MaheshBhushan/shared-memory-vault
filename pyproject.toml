@@ -1,0 +1,18 @@
+[project]
+name = "shared-memory-vault"
+version = "0.1.0"
+description = "Local, Markdown-native shared memory for coding agents"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+readme = "README.md"
+authors = [{name = "Mahesh Koduri"}]
+
+[project.scripts]
+memory = "agent_memory.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agent_memory*"]
