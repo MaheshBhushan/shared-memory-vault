@@ -10,6 +10,7 @@ from pathlib import Path
 
 CANONICAL_DIRS = ("projects", "wiki", "global")
 LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS documents(
@@ -35,7 +36,7 @@ CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE OF title,symptoms,tags,bo
  VALUES('delete',old.id,old.title,old.symptoms,old.tags,old.body);
  INSERT INTO documents_fts(rowid,title,symptoms,tags,body)
  VALUES(new.id,new.title,new.symptoms,new.tags,new.body); END;
-PRAGMA user_version=1;
+PRAGMA user_version=2;
 """
 
 
@@ -45,7 +46,10 @@ def connect(path: Path) -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys=ON")
     db.execute("PRAGMA journal_mode=WAL")
+    previous_version = db.execute("PRAGMA user_version").fetchone()[0]
     db.executescript(SCHEMA)
+    if previous_version == 1:
+        db.execute("UPDATE documents SET mtime=0,content_hash=''")
     return db
 
 
@@ -95,6 +99,12 @@ def _relative(vault: Path, path: Path) -> str:
     return relative.as_posix()
 
 
+def _document_links(body: str):
+    links = [value.split("|", 1)[0].strip() for value in LINK_RE.findall(body)]
+    links.extend(value.strip().strip("<>") for value in MARKDOWN_LINK_RE.findall(body))
+    return list(dict.fromkeys(link for link in links if link))
+
+
 def _index_file(db, vault: Path, path: Path) -> str:
     relative = _relative(vault, path)
     if not path.exists():
@@ -110,9 +120,18 @@ def _index_file(db, vault: Path, path: Path) -> str:
         db.execute("UPDATE documents SET mtime=? WHERE path=?", (mtime, relative))
         return "unchanged"
     meta, title, body, tags = parse_markdown(path)
+    document_links = _document_links(body)
+    declared_sources = meta.get("source_links", [])
+    if isinstance(declared_sources, str):
+        declared_sources = [declared_sources]
+    searchable = [meta.get("cause"), meta.get("escalation_boundary")]
+    if (meta.get("review_status") == "reviewed"
+            and (any(declared_sources) or document_links)):
+        searchable.append(meta.get("resolution"))
+    indexed_body = body + "\n" + "\n".join(str(value) for value in searchable if value)
     values = (relative, meta.get("type"), meta.get("project"), title, meta.get("date"),
               meta.get("harness"), meta.get("session_id"), meta.get("host"), mtime,
-              digest, meta.get("symptoms"), tags, body,
+              digest, meta.get("symptoms"), tags, indexed_body,
               json.dumps(meta, ensure_ascii=False, sort_keys=True))
     db.execute("""INSERT INTO documents(path,type,project,title,date,harness,session_id,host,
       mtime,content_hash,symptoms,tags,body,metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -123,8 +142,7 @@ def _index_file(db, vault: Path, path: Path) -> str:
       body=excluded.body,metadata=excluded.metadata""", values)
     db.execute("DELETE FROM links WHERE source_path=?", (relative,))
     db.executemany("INSERT INTO links(source_path,target) VALUES(?,?)",
-                   ((relative, value.split("|", 1)[0].strip()) for value in LINK_RE.findall(body)
-                    if value.split("|", 1)[0].strip()))
+                   ((relative, target) for target in document_links))
     return "indexed"
 
 

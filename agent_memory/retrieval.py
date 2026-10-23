@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 STOP = set("""a an and are as at be but by can do does for from get got how i if in into
@@ -34,7 +35,29 @@ def recall(db, query: str, limit=3, project=None, global_only=False):
     rank = (f"bm25(documents_fts,{weights})*CASE WHEN documents.type IN "
             f"('wiki','global') THEN {SYNTHESIS_BOOST} ELSE 1.0 END")
     rows = db.execute(f"""SELECT documents.path,documents.title,documents.project,
-      -({rank}) AS score,snippet(documents_fts,3,'[',']',' … ',18) AS snippet
+      documents.type,documents.metadata,-({rank}) AS score,
+      snippet(documents_fts,3,'[',']',' … ',18) AS snippet
       FROM documents_fts JOIN documents ON documents.id=documents_fts.rowid
       WHERE {' AND '.join(filters)} ORDER BY score DESC,documents.path LIMIT ?""", params)
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        hit = dict(row)
+        metadata = json.loads(hit.pop("metadata"))
+        if hit["type"] == "runbook":
+            links = metadata.get("source_links", [])
+            if isinstance(links, str):
+                links = [links]
+            links = [str(link) for link in links if link]
+            links.extend(link[0] for link in db.execute(
+                "SELECT target FROM links WHERE source_path=? ORDER BY rowid", (hit["path"],)))
+            hit.update(review_status=metadata.get("review_status"),
+                       symptoms=metadata.get("symptoms"), cause=metadata.get("cause"),
+                       escalation_boundary=metadata.get("escalation_boundary"),
+                       source_links=list(dict.fromkeys(links)))
+            reviewed = metadata.get("review_status") == "reviewed"
+            if reviewed and hit["source_links"] and metadata.get("resolution"):
+                hit["resolution"] = metadata["resolution"]
+            else:
+                hit["resolution"] = None
+        results.append(hit)
+    return results

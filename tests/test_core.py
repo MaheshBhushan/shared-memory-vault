@@ -56,5 +56,64 @@ class CoreTest(unittest.TestCase):
             db.row_factory = sqlite3.Row
             self.assertEqual(note.relative_to(self.config.vault).as_posix(), recall(db, "teal chosen")[0]["path"])
 
+    def test_runbook_resolution_requires_review_and_sources(self):
+        approved = self.config.vault / "wiki/approved-runbook.md"
+        approved.write_text('''---
+type: runbook
+review_status: reviewed
+symptoms: "printer offline"
+cause: "stale spool queue"
+resolution: "restart the print spooler"
+escalation_boundary: "Escalate if the queue returns after restart."
+source_links: ["https://docs.example/spooler"]
+---
+# Printer support runbook
+Confirm the queue state. See [vendor guidance](https://vendor.example/printer).
+''', encoding="utf-8")
+        unreviewed = self.config.vault / "wiki/unreviewed-runbook.md"
+        unreviewed.write_text('''---
+type: runbook
+review_status: draft
+symptoms: "scanner offline"
+cause: "expired scanner lease"
+resolution: "renew the lease"
+escalation_boundary: "Escalate if renewal fails."
+source_links: ["https://docs.example/scanner"]
+---
+# Scanner support runbook
+''', encoding="utf-8")
+        unsourced = self.config.vault / "wiki/unsourced-runbook.md"
+        unsourced.write_text('''---
+type: runbook
+review_status: reviewed
+symptoms: "router disconnected"
+resolution: "reboot the router"
+---
+# Router support runbook
+''', encoding="utf-8")
+        with closing(connect(self.config.database)) as db:
+            update(db, self.config.vault, rebuild=True)
+            printer = recall(db, "printer offline")[0]
+            scanner = recall(db, "scanner offline")[0]
+            router = recall(db, "router disconnected")[0]
+        self.assertEqual("restart the print spooler", printer["resolution"])
+        self.assertEqual("stale spool queue", printer["cause"])
+        self.assertEqual("Escalate if the queue returns after restart.", printer["escalation_boundary"])
+        self.assertIn("https://docs.example/spooler", printer["source_links"])
+        self.assertIn("https://vendor.example/printer", printer["source_links"])
+        self.assertIsNone(scanner["resolution"])
+        self.assertIn("https://docs.example/scanner", scanner["source_links"])
+        self.assertIsNone(router["resolution"])
+
+    def test_index_upgrade_reindexes_existing_documents(self):
+        with closing(connect(self.config.database)) as db:
+            update(db, self.config.vault, rebuild=True)
+        with closing(sqlite3.connect(self.config.database)) as db:
+            db.execute("PRAGMA user_version=1")
+        with closing(connect(self.config.database)) as db:
+            counts = update(db, self.config.vault)
+            self.assertEqual(2, counts["indexed"])
+            self.assertEqual(2, db.execute("PRAGMA user_version").fetchone()[0])
+
 
 if __name__ == "__main__": unittest.main()

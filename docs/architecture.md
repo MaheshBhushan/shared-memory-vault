@@ -28,6 +28,11 @@ compact Markdown pointers
 
 The service keeps SQLite open and avoids interpreter startup in resident adapters. FTS5 uses `porter unicode61`, BM25 weights `8/10/5/1`, and a `1.08` synthesis-page boost. Wikilinks are indexed as relations but do not affect ranking.
 
+Support runbooks use `type: runbook` and frontmatter fields for symptoms, cause,
+resolution, escalation boundary, review status, and source links. Recall exposes
+the resolution only for `review_status: reviewed` runbooks with source links;
+source links and escalation boundaries accompany the returned resolution.
+
 Failure is fail-open: IPC → direct read-only SQLite → silent miss. Hooks always exit successfully.
 
 ## Background write path

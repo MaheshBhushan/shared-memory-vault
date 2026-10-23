@@ -35,7 +35,16 @@ def recall_hook(payload):
     if not results:
         return ""
     lines = ["Relevant shared memory (read a file only if needed):"]
-    lines.extend(f"- {config.vault / hit['path']} — {hit['title']}" for hit in results)
+    for hit in results:
+        lines.append(f"- {config.vault / hit['path']} — {hit['title']}")
+        if hit.get("type") == "runbook":
+            lines.append(f"  Symptoms: {hit.get('symptoms') or 'not recorded'}; cause: {hit.get('cause') or 'not recorded'}.")
+            if hit.get("resolution"):
+                lines.append(f"  Reviewed resolution: {hit['resolution']}")
+            if hit.get("escalation_boundary"):
+                lines.append(f"  Escalation boundary: {hit['escalation_boundary']}")
+            if hit.get("source_links"):
+                lines.append(f"  Sources: {', '.join(hit['source_links'])}")
     return "\n".join(lines)
 
 

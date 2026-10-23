@@ -101,7 +101,12 @@ def main(argv=None):
                 db.row_factory = sqlite3.Row; results = recall(db, args.query, args.limit, args.project, args.global_only)
         if args.json: print(json.dumps(results, ensure_ascii=False))
         else:
-            for hit in results: print(f"{hit['score']:.4f} {hit['path']} — {hit['title']}")
+            for hit in results:
+                print(f"{hit['score']:.4f} {hit['path']} — {hit['title']}")
+                if hit.get("resolution"):
+                    print(f"  Reviewed resolution: {hit['resolution']}")
+                    print(f"  Escalation boundary: {hit.get('escalation_boundary') or 'not recorded'}")
+                    print(f"  Sources: {', '.join(hit['source_links'])}")
     elif args.action == "daemon": serve(args.config)
     elif args.action == "doctor": print(json.dumps(doctor(config), indent=2))
     elif args.action == "synthesize": print(f"processed={process_queue(config)}")
